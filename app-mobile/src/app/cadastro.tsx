@@ -2,8 +2,7 @@ import { router } from "expo-router";
 import { useState } from "react";
 import { Alert, Platform, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { theme } from "../../constants/theme";
-import { loginUser } from "../apiService/api";
-
+import { createUser, findUserByEmail } from "../apiService/api";
 
 
 function mostrarAlerta(titulo: string, mensagem: string) {
@@ -13,27 +12,50 @@ function mostrarAlerta(titulo: string, mensagem: string) {
     Alert.alert(titulo, mensagem);
   }
 }
-
-export default function Login() {
+export default function Cadastro() {
+  const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [showSenha, setShowSenha] = useState(false);
+  const [senhaStrength, setSenhaStrength] = useState(0);
 
-  async function handleLogin() {
+  function calcStrength(value: string): number {
+    let s = 0;
+    if (value.length >= 6) s++;
+    if (value.length >= 10) s++;
+    if (/[A-Z]/.test(value) && /[0-9]/.test(value)) s++;
+    if (/[^A-Za-z0-9]/.test(value)) s++;
+    return s;
+  }
+
+  function getStrengthColor(index: number): string {
+    if (index >= senhaStrength) return theme.colors.inputBorder;
+    const colors = ["", "#e74c3c", "#f39c12", theme.colors.primary, theme.colors.primary];
+    return colors[senhaStrength] || theme.colors.inputBorder;
+  }
+
+  function getStrengthLabel(): string {
+    if (senha.length === 0) return "";
+    const labels = ["", "Fraca", "Média", "Forte", "Muito forte"];
+    return labels[senhaStrength] || "";
+  }
+
+  async function handleCadastro() {
     try {
-      if (!email || !senha) {
-        mostrarAlerta("Atenção", "Preencha todos os campos."); // ← trocado
+      if (!nome || !email || !senha) {
+        Alert.alert("Atenção", "Preencha todos os campos.");
         return;
       }
-      const usuario = await loginUser(email, senha);
-      if (usuario) {
-        mostrarAlerta("Sucesso", "Login realizado com sucesso!"); // ← trocado
-        router.push("/home");
-      } else {
-        mostrarAlerta("Erro", "E-mail ou senha inválidos."); // ← trocado
+      const usuarios = await findUserByEmail(email);
+      if (usuarios.length > 0) {
+        Alert.alert("Erro", "Já existe um usuário com esse e-mail.");
+        return;
       }
+      await createUser(nome, email, senha);
+      Alert.alert("Sucesso", "Cadastro realizado com sucesso!");
+      router.push("/login");
     } catch (error) {
-      mostrarAlerta("Erro", "Não foi possível fazer login."); // ← trocado
+      Alert.alert("Erro", "Não foi possível cadastrar.");
       console.log(error);
     }
   }
@@ -67,8 +89,30 @@ export default function Login() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.sectionTitle}>ENTRAR</Text>
-        <Text style={styles.sectionSub}>BEM-VINDO DE VOLTA</Text>
+        <Text style={styles.sectionTitle}>CRIAR CONTA</Text>
+        <Text style={styles.sectionSub}>Junte-se ao jogo</Text>
+
+        {/* Avatar upload */}
+        <View style={styles.avatarRow}>
+          <TouchableOpacity style={styles.avatarCircle}>
+            <Text style={styles.avatarIcon}>👤</Text>
+            <View style={styles.avatarBadge}>
+              <Text style={styles.avatarBadgeText}>+</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        {/* Nome field */}
+        <View style={styles.fieldGroup}>
+          <Text style={styles.fieldLabel}>👤  NOME</Text>
+          <TextInput
+            style={styles.fieldInput}
+            placeholder="Seu nome completo"
+            placeholderTextColor={theme.colors.placeholder}
+            value={nome}
+            onChangeText={setNome}
+          />
+        </View>
 
         {/* Email field */}
         <View style={styles.fieldGroup}>
@@ -90,10 +134,13 @@ export default function Login() {
           <View style={styles.pwdWrap}>
             <TextInput
               style={[styles.fieldInput, { paddingRight: 46 }]}
-              placeholder="Sua senha"
+              placeholder="Mínimo 8 caracteres"
               placeholderTextColor={theme.colors.placeholder}
               value={senha}
-              onChangeText={setSenha}
+              onChangeText={(v) => {
+                setSenha(v);
+                setSenhaStrength(calcStrength(v));
+              }}
               secureTextEntry={!showSenha}
             />
             <TouchableOpacity
@@ -103,23 +150,32 @@ export default function Login() {
               <Text style={styles.eyeIcon}>{showSenha ? "🙈" : "👁️"}</Text>
             </TouchableOpacity>
           </View>
+
+          {/* Strength bar */}
+          <View style={styles.strengthBar}>
+            {[0, 1, 2, 3].map((i) => (
+              <View
+                key={i}
+                style={[styles.sb, { backgroundColor: getStrengthColor(i + 1) }]}
+              />
+            ))}
+          </View>
+          {senha.length > 0 && (
+            <Text style={styles.strengthLabel}>{getStrengthLabel()}</Text>
+          )}
         </View>
 
-        <TouchableOpacity style={styles.forgotRow}>
-          <Text style={styles.forgotText}>Esqueceu a senha?</Text>
+        <TouchableOpacity style={styles.btnCadastrar} onPress={handleCadastro}>
+          <Text style={styles.btnCadastrarText}>CADASTRAR</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.btnLogin} onPress={handleLogin}>
-          <Text style={styles.btnLoginText}>ENTRAR</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.cadastroLink}>
-          Não tem conta?{" "}
+        <Text style={styles.loginLink}>
+          Já tem conta?{" "}
           <Text
-            style={styles.cadastroLinkBold}
-            onPress={() => router.push("/cadastro")}
+            style={styles.loginLinkBold}
+            onPress={() => router.push("/login")}
           >
-            Cadastre-se
+            Entrar
           </Text>
         </Text>
       </ScrollView>
@@ -226,7 +282,7 @@ const styles = StyleSheet.create({
   /* ── Content ── */
   content: {
     paddingHorizontal: 22,
-    paddingTop: 28,
+    paddingTop: 20,
     paddingBottom: 40,
   },
   sectionTitle: {
@@ -242,12 +298,50 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 1,
     textTransform: "uppercase",
-    marginBottom: 28,
+    marginBottom: 18,
+  },
+
+  /* ── Avatar ── */
+  avatarRow: {
+    alignItems: "center",
+    marginBottom: 18,
+  },
+  avatarCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 2,
+    borderColor: "#00e05a55",
+    borderStyle: "dashed",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  avatarIcon: {
+    fontSize: 24,
+    opacity: 0.5,
+  },
+  avatarBadge: {
+    position: "absolute",
+    bottom: 2,
+    right: 2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: theme.colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarBadgeText: {
+    color: theme.colors.background,
+    fontSize: 14,
+    fontWeight: "900",
+    lineHeight: 16,
   },
 
   /* ── Fields ── */
   fieldGroup: {
-    marginBottom: 16,
+    marginBottom: 14,
   },
   fieldLabel: {
     fontSize: 11,
@@ -281,15 +375,24 @@ const styles = StyleSheet.create({
   eyeIcon: {
     fontSize: 16,
   },
-  forgotRow: {
-    alignSelf: "flex-end",
-    marginBottom: 20,
-    marginTop: 4,
+
+  /* ── Strength ── */
+  strengthBar: {
+    flexDirection: "row",
+    gap: 4,
+    marginTop: 7,
   },
-  forgotText: {
-    fontSize: 12,
-    color: theme.colors.link,
-    fontWeight: "600",
+  sb: {
+    flex: 1,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: theme.colors.inputBorder,
+  },
+  strengthLabel: {
+    fontSize: 10,
+    color: theme.colors.subtext,
+    marginTop: 4,
+    textAlign: "right",
   },
 
   /* ── Divider ── */
@@ -297,7 +400,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginBottom: 14,
+    marginVertical: 14,
   },
   dividerLine: {
     flex: 1,
@@ -313,7 +416,7 @@ const styles = StyleSheet.create({
   socialRow: {
     flexDirection: "row",
     gap: 10,
-    marginBottom: 20,
+    marginBottom: 14,
   },
   socBtn: {
     flex: 1,
@@ -332,27 +435,28 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  /* ── Buttons ── */
-  btnLogin: {
+  /* ── Button ── */
+  btnCadastrar: {
     width: "100%",
     paddingVertical: 15,
     backgroundColor: theme.colors.primary,
     borderRadius: 16,
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 14,
   },
-  btnLoginText: {
+  btnCadastrarText: {
     color: theme.colors.background,
     fontWeight: "900",
     fontSize: 15,
     letterSpacing: 2,
+    textTransform: "uppercase",
   },
-  cadastroLink: {
+  loginLink: {
     textAlign: "center",
     fontSize: 12,
     color: "#2a5c35",
   },
-  cadastroLinkBold: {
+  loginLinkBold: {
     color: theme.colors.link,
     fontWeight: "700",
   },

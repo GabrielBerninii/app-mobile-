@@ -1,14 +1,47 @@
 {
   "usuarios": [
     {
-      "id": 1,
-      "login": "admin",
-      "senha": "123"
+      "nome": "gabriel",
+      "email": "gabriel@gmail.com",
+      "senha": "123",
+      "id": "Lmce9wuGvX0"
     },
     {
-      "id": 2,
-      "login": "gabriel",
-      "senha": "1234"
+      "nome": "gusta",
+      "email": "gusta@gmail.com",
+      "senha": "123",
+      "id": "O5ZJgeusJd8"
+    },
+    {
+      "nome": "ale",
+      "email": "ale@gmail.com",
+      "senha": "123",
+      "id": "Lw-YYOXHRtw"
+    },
+    {
+      "nome": "Ber",
+      "email": "ber@gmail.com",
+      "senha": "12345678",
+      "id": "G3LVqMdJ5ko"
+    },
+    {
+      "nome": "asfew",
+      "email": "asfew@gmail.com",
+      "senha": "12345678",
+      "id": "dJpcgxzZvbo"
     }
-  ]
+  ],
+  "alunos": [
+    {
+      "nomeAluno": "Gustavo Silva",
+      "nomeMae": "Maria Silva",
+      "idade": "7",
+      "endereco": "Novo São Geraldo",
+      "dataNascimento": "22/05/2018",
+      "valor": 250,
+      "pago": true,
+      "id": "wHRj582ABcY"
+    }
+  ],
+  "$schema": "./node_modules/json-server/schema.json"
 }
