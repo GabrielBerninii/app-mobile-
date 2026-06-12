@@ -1,0 +1,60 @@
+/* ========== RESET E BASE ========== */
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ========== FALLBACK PARA FOCO ========== */
+
+button:focus {
+  outline: none;
+}
+
+/* ========== ANIMAÇÕES ========== */
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse-custom {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ========== TRANSIÇÕES SUAVES PARA VITÓRIA ========== */
+
+button.cell-button {
+  transition: background-color 0.3s ease, box-shadow 0.3s ease, color 0.3s ease;
+}
+
+/* ========== COMPATIBILIDADE COM BROWSERS ANTIGOS ========== */
+
+/* Garantir que disabled funcione em mobile */
+button:disabled {
+  pointer-events: none;
+}
+
+/* ========== PRINT STYLES ========== */
+
+@media print {
+  #app {
+    display: none;
+  }
+}

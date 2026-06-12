@@ -3,6 +3,10 @@ import { useState } from "react";
 import { Alert, Platform, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { theme } from "../../constants/theme";
 import { createUser, findUserByEmail } from "../apiService/api";
+import { logger } from "../utils/logger";
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SENHA_MIN = 8;
 
 
 function mostrarAlerta(titulo: string, mensagem: string) {
@@ -43,20 +47,28 @@ export default function Cadastro() {
   async function handleCadastro() {
     try {
       if (!nome || !email || !senha) {
-        Alert.alert("Atenção", "Preencha todos os campos.");
+        mostrarAlerta("Atenção", "Preencha todos os campos.");
+        return;
+      }
+      if (!EMAIL_REGEX.test(email)) {
+        mostrarAlerta("Atenção", "Informe um e-mail válido.");
+        return;
+      }
+      if (senha.length < SENHA_MIN) {
+        mostrarAlerta("Atenção", `A senha deve ter no mínimo ${SENHA_MIN} caracteres.`);
         return;
       }
       const usuarios = await findUserByEmail(email);
       if (usuarios.length > 0) {
-        Alert.alert("Erro", "Já existe um usuário com esse e-mail.");
+        mostrarAlerta("Erro", "Já existe um usuário com esse e-mail.");
         return;
       }
       await createUser(nome, email, senha);
-      Alert.alert("Sucesso", "Cadastro realizado com sucesso!");
+      mostrarAlerta("Sucesso", "Cadastro realizado com sucesso!");
       router.push("/login");
     } catch (error) {
-      Alert.alert("Erro", "Não foi possível cadastrar.");
-      console.log(error);
+      logger.error("Cadastro.handleCadastro", error);
+      mostrarAlerta("Erro", "Não foi possível cadastrar. Tente novamente.");
     }
   }
 
@@ -92,20 +104,11 @@ export default function Cadastro() {
         <Text style={styles.sectionTitle}>CRIAR CONTA</Text>
         <Text style={styles.sectionSub}>Junte-se ao jogo</Text>
 
-        {/* Avatar upload */}
-        <View style={styles.avatarRow}>
-          <TouchableOpacity style={styles.avatarCircle}>
-            <Text style={styles.avatarIcon}>👤</Text>
-            <View style={styles.avatarBadge}>
-              <Text style={styles.avatarBadgeText}>+</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-
         {/* Nome field */}
         <View style={styles.fieldGroup}>
           <Text style={styles.fieldLabel}>👤  NOME</Text>
           <TextInput
+            testID="cadastro-nome"
             style={styles.fieldInput}
             placeholder="Seu nome completo"
             placeholderTextColor={theme.colors.placeholder}
@@ -118,6 +121,7 @@ export default function Cadastro() {
         <View style={styles.fieldGroup}>
           <Text style={styles.fieldLabel}>✉  EMAIL</Text>
           <TextInput
+            testID="cadastro-email"
             style={styles.fieldInput}
             placeholder="seu@email.com"
             placeholderTextColor={theme.colors.placeholder}
@@ -133,6 +137,7 @@ export default function Cadastro() {
           <Text style={styles.fieldLabel}>🔒  SENHA</Text>
           <View style={styles.pwdWrap}>
             <TextInput
+              testID="cadastro-senha"
               style={[styles.fieldInput, { paddingRight: 46 }]}
               placeholder="Mínimo 8 caracteres"
               placeholderTextColor={theme.colors.placeholder}
@@ -165,7 +170,11 @@ export default function Cadastro() {
           )}
         </View>
 
-        <TouchableOpacity style={styles.btnCadastrar} onPress={handleCadastro}>
+        <TouchableOpacity
+          testID="cadastro-submit"
+          style={styles.btnCadastrar}
+          onPress={handleCadastro}
+        >
           <Text style={styles.btnCadastrarText}>CADASTRAR</Text>
         </TouchableOpacity>
 
@@ -299,44 +308,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textTransform: "uppercase",
     marginBottom: 18,
-  },
-
-  /* ── Avatar ── */
-  avatarRow: {
-    alignItems: "center",
-    marginBottom: 18,
-  },
-  avatarCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    borderWidth: 2,
-    borderColor: "#00e05a55",
-    borderStyle: "dashed",
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-  },
-  avatarIcon: {
-    fontSize: 24,
-    opacity: 0.5,
-  },
-  avatarBadge: {
-    position: "absolute",
-    bottom: 2,
-    right: 2,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: theme.colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  avatarBadgeText: {
-    color: theme.colors.background,
-    fontSize: 14,
-    fontWeight: "900",
-    lineHeight: 16,
   },
 
   /* ── Fields ── */

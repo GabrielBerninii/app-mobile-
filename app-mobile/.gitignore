@@ -30,8 +30,13 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
-.env*.local
+# local env files — nunca versionar arquivos com segredos
+.env
+.env.*
+!.env.example
+
+# Banco de dados local — contém PII e senhas em plaintext
+json-server/db.json
 
 # typescript
 *.tsbuildinfo
@@ -41,3 +46,14 @@ app-example
 # generated native folders
 /ios
 /android
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+.expo-e2e/
+.expo-e2e-home/
+evidences/**/*.png
+!evidences/**/.gitkeep

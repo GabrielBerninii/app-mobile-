@@ -52,6 +52,7 @@ export default function Index() {
         </View>
 
         <TouchableOpacity
+          testID="botao-entrar"
           style={styles.btnLogin}
           onPress={() => router.push("/login")}
         >
@@ -59,16 +60,12 @@ export default function Index() {
         </TouchableOpacity>
 
         <TouchableOpacity
+          testID="botao-criar-conta"
           style={styles.btnCadastrar}
           onPress={() => router.push("/cadastro")}
         >
           <Text style={styles.btnCadastrarText}>CRIAR CONTA</Text>
         </TouchableOpacity>
-
-        <Text style={styles.footerText}>
-          Ao continuar, você aceita os{" "}
-          <Text style={styles.footerLink}>Termos de Uso</Text>
-        </Text>
       </View>
     </View>
   );

@@ -1,24 +1,35 @@
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { theme } from "../../constants/theme";
 
 export default function Home() {
+  const { usuarioId, usuarioNome } = useLocalSearchParams();
+  const usuarioIdStr = String(usuarioId || "");
+  const usuarioNomeStr = String(usuarioNome || "");
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>⚽ Bem-vindo ao Futebol App</Text>
       <Text style={styles.subtitle}>Escolha uma opção abaixo</Text>
 
       <TouchableOpacity
+        testID="home-ginasios"
         style={styles.card}
-        onPress={() => router.push("/lista")}
+        onPress={() =>
+          router.push({
+            pathname: "/ginasios",
+            params: { usuarioId: usuarioIdStr, usuarioNome: usuarioNomeStr },
+          })
+        }
       >
-        <Text style={styles.cardTitle}>Lista dos alunos</Text>
-        <Text style={styles.cardText}>Ver e cadastrar alunos</Text>
+        <Text style={styles.cardTitle}>Lista dos ginásios</Text>
+        <Text style={styles.cardText}>Ver ginásios</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
+        testID="home-sair"
         style={styles.logoutButton}
-        onPress={() => router.push("/login")}
+        onPress={() => router.replace("/login")}
       >
         <Text style={styles.logoutText}>Sair</Text>
       </TouchableOpacity>

@@ -17,4 +17,22 @@ export const theme = {
     placeholder: "#2e5c35",
   },
 };
- 
+
+export const Colors = {
+  light: {
+    text: theme.colors.background,
+    background: theme.colors.white,
+    tint: theme.colors.primary,
+    icon: theme.colors.label,
+    tabIconDefault: theme.colors.placeholder,
+    tabIconSelected: theme.colors.primary,
+  },
+  dark: {
+    text: theme.colors.white,
+    background: theme.colors.background,
+    tint: theme.colors.primary,
+    icon: theme.colors.secondary,
+    tabIconDefault: theme.colors.placeholder,
+    tabIconSelected: theme.colors.primary,
+  },
+};

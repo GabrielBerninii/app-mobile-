@@ -3,8 +3,9 @@ import { useState } from "react";
 import { Alert, Platform, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { theme } from "../../constants/theme";
 import { loginUser } from "../apiService/api";
+import { logger } from "../utils/logger";
 
-
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function mostrarAlerta(titulo: string, mensagem: string) {
   if (Platform.OS === "web") {
@@ -22,19 +23,26 @@ export default function Login() {
   async function handleLogin() {
     try {
       if (!email || !senha) {
-        mostrarAlerta("Atenção", "Preencha todos os campos."); // ← trocado
+        mostrarAlerta("Atenção", "Preencha todos os campos.");
+        return;
+      }
+      if (!EMAIL_REGEX.test(email)) {
+        mostrarAlerta("Atenção", "Informe um e-mail válido.");
         return;
       }
       const usuario = await loginUser(email, senha);
       if (usuario) {
-        mostrarAlerta("Sucesso", "Login realizado com sucesso!"); // ← trocado
-        router.push("/home");
+        mostrarAlerta("Sucesso", "Login realizado com sucesso!");
+        router.push({
+          pathname: "/home",
+          params: { usuarioId: usuario.id, usuarioNome: usuario.nome },
+        });
       } else {
-        mostrarAlerta("Erro", "E-mail ou senha inválidos."); // ← trocado
+        mostrarAlerta("Erro", "E-mail ou senha inválidos.");
       }
     } catch (error) {
-      mostrarAlerta("Erro", "Não foi possível fazer login."); // ← trocado
-      console.log(error);
+      logger.error("Login.handleLogin", error);
+      mostrarAlerta("Erro", "Não foi possível fazer login. Tente novamente.");
     }
   }
 
@@ -74,6 +82,7 @@ export default function Login() {
         <View style={styles.fieldGroup}>
           <Text style={styles.fieldLabel}>✉  EMAIL</Text>
           <TextInput
+            testID="login-email"
             style={styles.fieldInput}
             placeholder="seu@email.com"
             placeholderTextColor={theme.colors.placeholder}
@@ -89,6 +98,7 @@ export default function Login() {
           <Text style={styles.fieldLabel}>🔒  SENHA</Text>
           <View style={styles.pwdWrap}>
             <TextInput
+              testID="login-senha"
               style={[styles.fieldInput, { paddingRight: 46 }]}
               placeholder="Sua senha"
               placeholderTextColor={theme.colors.placeholder}
@@ -109,7 +119,7 @@ export default function Login() {
           <Text style={styles.forgotText}>Esqueceu a senha?</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.btnLogin} onPress={handleLogin}>
+        <TouchableOpacity testID="login-submit" style={styles.btnLogin} onPress={handleLogin}>
           <Text style={styles.btnLoginText}>ENTRAR</Text>
         </TouchableOpacity>
 

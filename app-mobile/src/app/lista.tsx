@@ -1,4 +1,7 @@
-import { useEffect, useState } from "react";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
+import { logger } from "../utils/logger";
 import {
   Alert,
   FlatList,
@@ -14,23 +17,25 @@ import {
 } from "react-native";
 import { theme } from "../../constants/theme";
 import {
-  getAlunos,
-  adicionarAluno,
-  editarAluno,
-  removerAluno,
-  togglePagamento,
+  adicionarReserva,
+  calcularHoraFim,
+  calcularValor,
+  editarReserva,
+  getReservasPorGinasio,
+  horarioUltrapassaDia,
+  removerReserva,
+  verificarConflito,
 } from "../apiService/api";
+import { Reserva } from "../types/reserva";
 
-interface Aluno {
-  id?: string;
-  nomeAluno: string;
-  nomeMae: string;
-  idade: string;
-  endereco: string;
-  dataNascimento: string;
-  valor: number;
-  pago: boolean;
-}
+const QUADRAS = ["Quadra 1", "Quadra 2", "Quadra 3"];
+const DURACOES = [
+  { label: "30 minutos", valor: 30 },
+  { label: "1 hora", valor: 60 },
+  { label: "1 hora e 30 minutos", valor: 90 },
+  { label: "2 horas", valor: 120 },
+  { label: "2 horas e 30 minutos", valor: 150 },
+];
 
 function mostrarAlerta(titulo: string, mensagem: string) {
   if (Platform.OS === "web") {
@@ -40,312 +45,514 @@ function mostrarAlerta(titulo: string, mensagem: string) {
   }
 }
 
-const FORM_VAZIO = {
-  nomeAluno: "",
-  nomeMae: "",
-  idade: "",
-  endereco: "",
-  dataNascimento: "",
-};
+function confirmarAcao(
+  titulo: string,
+  mensagem: string,
+  onConfirmar: () => void
+) {
+  if (Platform.OS === "web") {
+    if (window.confirm(`${titulo}: ${mensagem}`)) {
+      onConfirmar();
+    }
+    return;
+  }
+
+  Alert.alert(titulo, mensagem, [
+    { text: "Cancelar" },
+    { text: "Confirmar", onPress: onConfirmar },
+  ]);
+}
 
 export default function Lista() {
-  const [alunos, setAlunos] = useState<Aluno[]>([]);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [editando, setEditando] = useState<Aluno | null>(null);
+  const { ginasioId, ginasio, usuarioId: usuarioLogado } = useLocalSearchParams();
+  const router = useRouter();
+  const usuarioLogadoStr = String(usuarioLogado || "");
 
-  const [nomeAluno, setNomeAluno] = useState("");
-  const [nomeMae, setNomeMae] = useState("");
-  const [idade, setIdade] = useState("");
-  const [endereco, setEndereco] = useState("");
-  const [dataNascimento, setDataNascimento] = useState("");
+  const [reservas, setReservas] = useState<Reserva[]>([]);
+  const [modalNovaReserva, setModalNovaReserva] = useState(false);
+  const [editando, setEditando] = useState<Reserva | null>(null);
 
-  async function carregarAlunos() {
+  const [quadraSelecionada, setQuadraSelecionada] = useState("Quadra 1");
+  const [durationSelecionada, setDurationSelecionada] = useState(30);
+  const [nomeResponsavel, setNomeResponsavel] = useState("");
+  const [diaSelecionado, setDiaSelecionado] = useState(new Date());
+  const [horaSelecionada, setHoraSelecionada] = useState("09:00");
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+
+  const carregarReservas = useCallback(async () => {
     try {
-      const data = await getAlunos();
-      setAlunos(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.log(error);
-    }
-  }
+      const ginasioNumerico = Number(ginasioId);
 
-  function abrirModalNovo() {
-    setEditando(null);
-    setNomeAluno("");
-    setNomeMae("");
-    setIdade("");
-    setEndereco("");
-    setDataNascimento("");
-    setModalVisible(true);
-  }
-
-  function abrirModalEditar(aluno: Aluno) {
-    setEditando(aluno);
-    setNomeAluno(aluno.nomeAluno);
-    setNomeMae(aluno.nomeMae);
-    setIdade(aluno.idade);
-    setEndereco(aluno.endereco);
-    setDataNascimento(aluno.dataNascimento);
-    setModalVisible(true);
-  }
-
-  async function handleSalvar() {
-    if (!nomeAluno || !nomeMae || !idade || !endereco || !dataNascimento) {
-      mostrarAlerta("Atenção", "Preencha todos os campos.");
-      return;
-    }
-    try {
-      if (editando?.id) {
-        await editarAluno(editando.id, {
-          nomeAluno,
-          nomeMae,
-          idade,
-          endereco,
-          dataNascimento,
-          valor: 250,
-          pago: editando.pago,
-        });
-        mostrarAlerta("Sucesso", "Aluno atualizado!");
-      } else {
-        await adicionarAluno({
-          nomeAluno,
-          nomeMae,
-          idade,
-          endereco,
-          dataNascimento,
-          valor: 250,
-          pago: false,
-        });
-        mostrarAlerta("Sucesso", "Aluno cadastrado!");
+      if (Number.isNaN(ginasioNumerico)) {
+        mostrarAlerta("Erro", "Ginásio inválido.");
+        setReservas([]);
+        return;
       }
-      setModalVisible(false);
-      carregarAlunos();
-    } catch (error) {
-      mostrarAlerta("Erro", "Não foi possível salvar.");
-      console.log(error);
-    }
-  }
 
-  async function handleTogglePago(aluno: Aluno) {
-    if (!aluno.id) return;
-    try {
-      await togglePagamento(aluno.id, !aluno.pago);
-      carregarAlunos();
+      const data = await getReservasPorGinasio(ginasioNumerico);
+      setReservas(data);
     } catch (error) {
-      mostrarAlerta("Erro", "Não foi possível atualizar pagamento.");
+      logger.error("Lista.carregarReservas", error);
     }
-  }
-
-  async function handleRemover(id?: string) {
-    if (!id) return;
-    try {
-      await removerAluno(id);
-      carregarAlunos();
-    } catch (error) {
-      mostrarAlerta("Erro", "Não foi possível remover.");
-    }
-  }
-
-  function formatarData(valor: string) {
-    const nums = valor.replace(/\D/g, "").slice(0, 8);
-    if (nums.length <= 2) return nums;
-    if (nums.length <= 4) return `${nums.slice(0, 2)}/${nums.slice(2)}`;
-    return `${nums.slice(0, 2)}/${nums.slice(2, 4)}/${nums.slice(4)}`;
-  }
+  }, [ginasioId]);
 
   useEffect(() => {
-    carregarAlunos();
-  }, []);
+    carregarReservas();
+  }, [carregarReservas]);
 
-  const totalPago = alunos.filter((a) => a.pago).length;
-  const totalPendente = alunos.filter((a) => !a.pago).length;
+  const horaFim = calcularHoraFim(horaSelecionada, durationSelecionada);
+  const valorTotal = calcularValor(durationSelecionada);
+
+  function formatarData(data: Date): string {
+    const dia = String(data.getDate()).padStart(2, "0");
+    const mes = String(data.getMonth() + 1).padStart(2, "0");
+    const ano = data.getFullYear();
+
+    return `${dia}/${mes}/${ano}`;
+  }
+
+  function abrirModalNovaReserva() {
+    setEditando(null);
+    setQuadraSelecionada("Quadra 1");
+    setDurationSelecionada(30);
+    setNomeResponsavel("");
+    setDiaSelecionado(new Date());
+    setHoraSelecionada("09:00");
+    setModalNovaReserva(true);
+  }
+
+  function abrirModalEdicao(reserva: Reserva) {
+    setEditando(reserva);
+    setQuadraSelecionada(reserva.quadra);
+    setDurationSelecionada(reserva.duracao);
+    setNomeResponsavel(reserva.nomeResponsavel);
+    setHoraSelecionada(reserva.horaInicio);
+
+    const [dia, mes, ano] = reserva.dia.split("/").map(Number);
+    setDiaSelecionado(new Date(ano, mes - 1, dia));
+
+    setModalNovaReserva(true);
+  }
+
+  async function handleSalvarReserva() {
+    try {
+      if (!nomeResponsavel.trim()) {
+        mostrarAlerta("Erro", "Preencha o nome do responsável.");
+        return;
+      }
+
+      if (!usuarioLogadoStr) {
+        mostrarAlerta("Erro", "Faça login novamente para criar uma reserva.");
+        return;
+      }
+
+      if (horarioUltrapassaDia(horaSelecionada, durationSelecionada)) {
+        mostrarAlerta("Erro", "A reserva precisa terminar antes do fim do dia.");
+        return;
+      }
+
+      const ginasioNumerico = Number(ginasioId);
+
+      if (Number.isNaN(ginasioNumerico)) {
+        mostrarAlerta("Erro", "Ginásio inválido.");
+        return;
+      }
+
+      const diaFormatado = formatarData(diaSelecionado);
+      const temConflito = await verificarConflito(
+        ginasioNumerico,
+        quadraSelecionada,
+        diaFormatado,
+        horaSelecionada,
+        durationSelecionada,
+        editando?.id
+      );
+
+      if (temConflito) {
+        mostrarAlerta(
+          "Horário Indisponível",
+          "Esse horário já está agendado para esta quadra. Escolha outro horário."
+        );
+        return;
+      }
+
+      const novaReserva: Reserva = {
+        ginasioId: ginasioNumerico,
+        ginasioNome: String(ginasio),
+        quadra: quadraSelecionada,
+        nomeResponsavel: nomeResponsavel.trim(),
+        dia: diaFormatado,
+        horaInicio: horaSelecionada,
+        duracao: durationSelecionada,
+        horaFim,
+        valorTotal,
+        usuarioId: usuarioLogadoStr,
+      };
+
+      if (editando?.id) {
+        await editarReserva(editando.id, novaReserva);
+        mostrarAlerta("Sucesso", "Reserva atualizada com sucesso!");
+      } else {
+        await adicionarReserva(novaReserva);
+        mostrarAlerta("Sucesso", "Reserva criada com sucesso!");
+      }
+
+      setModalNovaReserva(false);
+      await carregarReservas();
+    } catch (error) {
+      logger.error("Lista.handleSalvarReserva", error);
+      mostrarAlerta("Erro", "Erro ao salvar reserva. Tente novamente.");
+    }
+  }
+
+  async function handleDeletarReserva(id: string) {
+    try {
+      await removerReserva(id);
+      mostrarAlerta("Sucesso", "Reserva removida com sucesso!");
+      await carregarReservas();
+    } catch (error) {
+      logger.error("Lista.handleDeletarReserva", error);
+      mostrarAlerta("Erro", "Erro ao deletar reserva. Tente novamente.");
+    }
+  }
+
+  function handleDateChange(_event: unknown, selectedDate?: Date) {
+    if (selectedDate) {
+      setDiaSelecionado(selectedDate);
+    }
+    setShowDatePicker(false);
+  }
+
+  function handleTimeChange(_event: unknown, selectedTime?: Date) {
+    if (selectedTime) {
+      const horas = String(selectedTime.getHours()).padStart(2, "0");
+      const minutos = String(selectedTime.getMinutes()).padStart(2, "0");
+      setHoraSelecionada(`${horas}:${minutos}`);
+    }
+    setShowTimePicker(false);
+  }
+
+  function handleWebDateChange(dateString: string) {
+    const [ano, mes, dia] = dateString.split("-");
+    const newDate = new Date(Number(ano), Number(mes) - 1, Number(dia));
+    setDiaSelecionado(newDate);
+  }
+
+  function renderReserva({ item }: { item: Reserva }) {
+    const ehDono = item.usuarioId === usuarioLogadoStr;
+
+    return (
+      <TouchableOpacity
+        testID={`reserva-card-${item.id || "sem-id"}`}
+        style={styles.reservaCard}
+        onPress={() => {
+          router.push({
+            pathname: "/detalhar",
+            params: {
+              reservaId: item.id,
+              usuarioId: usuarioLogadoStr,
+            },
+          });
+        }}
+        activeOpacity={0.7}
+      >
+        <View style={styles.reservaHeader}>
+          <View>
+            <Text style={styles.reservaQuadra}>{item.quadra}</Text>
+            {ehDono && <Text style={styles.donoBadge}>👑 Sua reserva</Text>}
+          </View>
+          <Text style={styles.reservaDia}>{item.dia}</Text>
+        </View>
+
+        <View style={styles.reservaBody}>
+          <Text style={styles.reservaLabel}>
+            <Text style={styles.reservaLabelBold}>Responsável: </Text>
+            {item.nomeResponsavel}
+          </Text>
+          <Text style={styles.reservaLabel}>
+            <Text style={styles.reservaLabelBold}>Horário: </Text>
+            {item.horaInicio} - {item.horaFim}
+          </Text>
+          <Text style={styles.reservaLabel}>
+            <Text style={styles.reservaLabelBold}>Duração: </Text>
+            {item.duracao} minutos
+          </Text>
+          <Text style={styles.reservaValor}>
+            Valor: R$ {item.valorTotal.toFixed(2)}
+          </Text>
+        </View>
+
+        <View style={styles.reservaFooter}>
+          <Text style={styles.reservaFooterText}>Toque para ver detalhes →</Text>
+        </View>
+
+        {ehDono && (
+          <View style={styles.reservaActions}>
+            <TouchableOpacity
+              testID={`reserva-editar-${item.id || "sem-id"}`}
+              style={styles.btnEditar}
+              onPress={(event) => {
+                event.stopPropagation();
+                abrirModalEdicao(item);
+              }}
+            >
+              <Text style={styles.btnText}>Editar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              testID={`reserva-deletar-${item.id || "sem-id"}`}
+              style={styles.btnDeletar}
+              onPress={(event) => {
+                event.stopPropagation();
+                confirmarAcao("Deletar", "Tem certeza que deseja deletar?", () => {
+                  if (item.id) {
+                    handleDeletarReserva(item.id);
+                  }
+                });
+              }}
+            >
+              <Text style={styles.btnText}>Deletar</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  }
 
   return (
-    <View style={styles.container}>
+    <View testID="lista-reservas" style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={theme.colors.background} />
 
-      {/* Field background */}
-      <View style={styles.fieldBg}>
-        <View style={styles.centerCircle} />
-        <View style={styles.halfLine} />
-      </View>
-
-      {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.pageTitle}>ESCOLINHA</Text>
-          <Text style={styles.pageSub}>DE FUTEBOL</Text>
+          <Text style={styles.headerTitle}>Reservas</Text>
+          <Text style={styles.headerSubtitle}>{ginasio}</Text>
         </View>
-        <View style={styles.logoBall}>
-          <View style={styles.ballHex} />
-        </View>
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <Text style={styles.backArrow}>←</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Stats bar */}
-      <View style={styles.statsBar}>
-        <View style={styles.statItem}>
-          <Text style={styles.statNumber}>{alunos.length}</Text>
-          <Text style={styles.statLabel}>Alunos</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statItem}>
-          <Text style={[styles.statNumber, { color: theme.colors.primary }]}>{totalPago}</Text>
-          <Text style={styles.statLabel}>Pagos</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statItem}>
-          <Text style={[styles.statNumber, { color: "#e74c3c" }]}>{totalPendente}</Text>
-          <Text style={styles.statLabel}>Pendentes</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statItem}>
-          <Text style={styles.statValue}>R$ {(totalPago * 250).toLocaleString("pt-BR")}</Text>
-          <Text style={styles.statLabel}>Recebido</Text>
-        </View>
-      </View>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <TouchableOpacity
+          testID="nova-reserva"
+          style={styles.novaReservaBtn}
+          onPress={abrirModalNovaReserva}
+        >
+          <Text style={styles.novaReservaBtnText}>+ Nova Reserva</Text>
+        </TouchableOpacity>
 
-      {/* List */}
-      {alunos.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyEmoji}>⚽</Text>
-          <Text style={styles.emptyText}>Nenhum aluno cadastrado</Text>
-          <Text style={styles.emptySubtext}>Toque no botão + para adicionar</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={alunos}
-          keyExtractor={(item, index) => item.id ?? String(index)}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          renderItem={({ item, index }) => (
-            <View style={[styles.card, item.pago && styles.cardPago]}>
-              {/* Número */}
-              <View style={styles.cardLeft}>
-                <View style={[styles.cardNumber, item.pago && styles.cardNumberPago]}>
-                  <Text style={styles.cardNumberText}>{index + 1}</Text>
-                </View>
-              </View>
+        {reservas.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateText}>Nenhuma reserva ainda</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={reservas}
+            renderItem={renderReserva}
+            keyExtractor={(item) =>
+              item.id ||
+              `${item.ginasioId}-${item.quadra}-${item.dia}-${item.horaInicio}`
+            }
+            scrollEnabled={false}
+          />
+        )}
+      </ScrollView>
 
-              {/* Info */}
-              <View style={styles.cardBody}>
-                <Text style={styles.cardName}>{item.nomeAluno}</Text>
-                <Text style={styles.cardInfo}>👩 {item.nomeMae}</Text>
-                <Text style={styles.cardInfo}>📅 {item.dataNascimento} · {item.idade} anos</Text>
-                <Text style={styles.cardInfo}>📍 {item.endereco}</Text>
+      <Modal visible={modalNovaReserva} animationType="slide" transparent={false}>
+        <View style={styles.modalContainer}>
+          <StatusBar barStyle="light-content" backgroundColor={theme.colors.background} />
 
-                {/* Botão pago/pendente */}
-                <TouchableOpacity
-                  style={[styles.pagoBadge, item.pago ? styles.pagoBadgePago : styles.pagoBadgePendente]}
-                  onPress={() => handleTogglePago(item)}
-                >
-                  <Text style={[styles.pagoBadgeText, item.pago ? styles.pagoBadgeTextPago : styles.pagoBadgeTextPendente]}>
-                    {item.pago ? "✓ PAGO R$ 250" : "✕ PENDENTE R$ 250"}
-                  </Text>
-                </TouchableOpacity>
-              </View>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+              {editando ? "Editar Reserva" : "Nova Reserva"}
+            </Text>
+            <TouchableOpacity onPress={() => setModalNovaReserva(false)}>
+              <Text style={styles.modalCloseBtn}>×</Text>
+            </TouchableOpacity>
+          </View>
 
-              {/* Ações */}
-              <View style={styles.cardActions}>
-                <TouchableOpacity
-                  style={styles.editBtn}
-                  onPress={() => abrirModalEditar(item)}
-                >
-                  <Text style={styles.editBtnText}>✏️</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.removeBtn}
-                  onPress={() => handleRemover(item.id)}
-                >
-                  <Text style={styles.removeBtnText}>🗑️</Text>
-                </TouchableOpacity>
+          <ScrollView
+            style={styles.modalContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.formSection}>
+              <Text style={styles.formLabel}>Escolha sua quadra</Text>
+              <View style={styles.quadrasContainer}>
+                {QUADRAS.map((quadra) => (
+                  <TouchableOpacity
+                    key={quadra}
+                    style={[
+                      styles.quadraBtn,
+                      quadraSelecionada === quadra && styles.quadraBtnActive,
+                    ]}
+                    onPress={() => setQuadraSelecionada(quadra)}
+                  >
+                    <Text
+                      style={[
+                        styles.quadraBtnText,
+                        quadraSelecionada === quadra &&
+                          styles.quadraBtnTextActive,
+                      ]}
+                    >
+                      {quadra}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             </View>
-          )}
-        />
-      )}
 
-      {/* FAB */}
-      <TouchableOpacity style={styles.fab} onPress={abrirModalNovo}>
-        <Text style={styles.fabText}>+</Text>
-      </TouchableOpacity>
+            <View style={styles.formSection}>
+              <Text style={styles.formLabel}>Duração da reserva</Text>
+              <View style={styles.durationContainer}>
+                {DURACOES.map((duracao) => (
+                  <TouchableOpacity
+                    key={duracao.valor}
+                    style={[
+                      styles.durationBtn,
+                      durationSelecionada === duracao.valor &&
+                        styles.durationBtnActive,
+                    ]}
+                    onPress={() => setDurationSelecionada(duracao.valor)}
+                  >
+                    <Text
+                      style={[
+                        styles.durationBtnText,
+                        durationSelecionada === duracao.valor &&
+                          styles.durationBtnTextActive,
+                      ]}
+                    >
+                      {duracao.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
 
-      {/* Modal */}
-      <Modal
-        visible={modalVisible}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {editando ? "EDITAR ALUNO" : "NOVO ALUNO"}
-              </Text>
-              <TouchableOpacity onPress={() => setModalVisible(false)}>
-                <Text style={styles.modalClose}>✕</Text>
+            <View style={styles.formSection}>
+              <Text style={styles.formLabel}>Nome da pessoa principal</Text>
+              <TextInput
+                testID="reserva-responsavel"
+                style={styles.input}
+                placeholder="Digite o nome"
+                placeholderTextColor={theme.colors.placeholder}
+                value={nomeResponsavel}
+                onChangeText={setNomeResponsavel}
+              />
+            </View>
+
+            <View style={styles.formSection}>
+              <Text style={styles.formLabel}>Dia da reserva</Text>
+              {Platform.OS === "web" ? (
+                <input
+                  type="date"
+                  value={`${String(diaSelecionado.getFullYear()).padStart(4, "0")}-${String(diaSelecionado.getMonth() + 1).padStart(2, "0")}-${String(diaSelecionado.getDate()).padStart(2, "0")}`}
+                  onChange={(event) => handleWebDateChange(event.target.value)}
+                  style={{
+                    padding: "12px 14px",
+                    backgroundColor: theme.colors.card,
+                    border: `1px solid ${theme.colors.inputBorder}`,
+                    borderRadius: "8px",
+                    fontSize: "16px",
+                    color: "#FFF",
+                    fontFamily: "Arial",
+                  } as React.CSSProperties}
+                />
+              ) : (
+                <>
+                  <TouchableOpacity
+                    style={styles.dateTimeBtn}
+                    onPress={() => setShowDatePicker(true)}
+                  >
+                    <Text style={styles.dateTimeBtnText}>
+                      📅 {formatarData(diaSelecionado)}
+                    </Text>
+                  </TouchableOpacity>
+                  {showDatePicker && (
+                    <DateTimePicker
+                      value={diaSelecionado}
+                      mode="date"
+                      display="default"
+                      onChange={handleDateChange}
+                    />
+                  )}
+                </>
+              )}
+            </View>
+
+            <View style={styles.formSection}>
+              <Text style={styles.formLabel}>Horário inicial</Text>
+              {Platform.OS === "web" ? (
+                <input
+                  type="time"
+                  value={horaSelecionada}
+                  onChange={(event) => setHoraSelecionada(event.target.value)}
+                  style={{
+                    padding: "12px 14px",
+                    backgroundColor: theme.colors.card,
+                    border: `1px solid ${theme.colors.inputBorder}`,
+                    borderRadius: "8px",
+                    fontSize: "16px",
+                    color: "#FFF",
+                    fontFamily: "Arial",
+                  } as React.CSSProperties}
+                />
+              ) : (
+                <>
+                  <TouchableOpacity
+                    style={styles.dateTimeBtn}
+                    onPress={() => setShowTimePicker(true)}
+                  >
+                    <Text style={styles.dateTimeBtnText}>🕐 {horaSelecionada}</Text>
+                  </TouchableOpacity>
+                  {showTimePicker && (
+                    <DateTimePicker
+                      value={new Date(`2024-01-01T${horaSelecionada}:00`)}
+                      mode="time"
+                      display="default"
+                      onChange={handleTimeChange}
+                    />
+                  )}
+                </>
+              )}
+            </View>
+
+            <View style={styles.resumoCard}>
+              <Text style={styles.resumoTitle}>Resumo da Reserva</Text>
+              <View style={styles.resumoLine}>
+                <Text style={styles.resumoLabel}>Horário final:</Text>
+                <Text style={styles.resumoValue}>{horaFim}</Text>
+              </View>
+              <View style={styles.resumoLine}>
+                <Text style={styles.resumoLabel}>Duração:</Text>
+                <Text style={styles.resumoValue}>{durationSelecionada} min</Text>
+              </View>
+              <View style={[styles.resumoLine, styles.resumoValorLine]}>
+                <Text style={styles.resumoLabel}>Valor total:</Text>
+                <Text style={styles.resumoValor}>
+                  R$ {valorTotal.toFixed(2)}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.formActions}>
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => setModalNovaReserva(false)}
+              >
+                <Text style={styles.cancelBtnText}>Cancelar</Text>
               </TouchableOpacity>
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={styles.valorBadge}>
-                <Text style={styles.valorBadgeText}>⚽ Mensalidade: R$ 250,00</Text>
-              </View>
-
-              <Text style={styles.inputLabel}>👦 NOME DA CRIANÇA</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Nome completo"
-                placeholderTextColor={theme.colors.placeholder}
-                value={nomeAluno}
-                onChangeText={setNomeAluno}
-              />
-
-              <Text style={styles.inputLabel}>👩 NOME DA MÃE</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Nome completo da mãe"
-                placeholderTextColor={theme.colors.placeholder}
-                value={nomeMae}
-                onChangeText={setNomeMae}
-              />
-
-              <Text style={styles.inputLabel}>🎂 IDADE</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Ex: 8"
-                placeholderTextColor={theme.colors.placeholder}
-                value={idade}
-                onChangeText={setIdade}
-                keyboardType="numeric"
-              />
-
-              <Text style={styles.inputLabel}>📅 DATA DE NASCIMENTO</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="DD/MM/AAAA"
-                placeholderTextColor={theme.colors.placeholder}
-                value={dataNascimento}
-                onChangeText={(v) => setDataNascimento(formatarData(v))}
-                keyboardType="numeric"
-                maxLength={10}
-              />
-
-              <Text style={styles.inputLabel}>📍 ENDEREÇO</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Rua, número, bairro"
-                placeholderTextColor={theme.colors.placeholder}
-                value={endereco}
-                onChangeText={setEndereco}
-              />
-
-              <TouchableOpacity style={styles.btnSalvar} onPress={handleSalvar}>
-                <Text style={styles.btnSalvarText}>
-                  {editando ? "SALVAR ALTERAÇÕES" : "CADASTRAR ALUNO"}
+              <TouchableOpacity
+                testID="reserva-salvar"
+                style={styles.salvarBtn}
+                onPress={handleSalvarReserva}
+              >
+                <Text style={styles.salvarBtnText}>
+                  {editando ? "Atualizar" : "Criar Reserva"}
                 </Text>
               </TouchableOpacity>
-            </ScrollView>
-          </View>
+            </View>
+          </ScrollView>
         </View>
       </Modal>
     </View>
@@ -353,145 +560,318 @@ export default function Lista() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background },
-
-  fieldBg: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: 0.06 },
-  centerCircle: {
-    position: "absolute", top: 30, left: "50%", marginLeft: -80,
-    width: 160, height: 160, borderRadius: 80,
-    borderWidth: 2, borderColor: theme.colors.fieldLine,
-  },
-  halfLine: {
-    position: "absolute", top: 110, left: 0, right: 0,
-    height: 1.5, backgroundColor: theme.colors.fieldLine,
-  },
-
-  header: {
-    paddingHorizontal: 22, paddingTop: 52, paddingBottom: 16,
-    flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end",
-  },
-  pageTitle: { fontSize: 32, color: theme.colors.white, fontWeight: "900", letterSpacing: 2, lineHeight: 36 },
-  pageSub: { fontSize: 14, color: theme.colors.primary, fontWeight: "700", letterSpacing: 3 },
-  logoBall: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: theme.colors.primary, alignItems: "center", justifyContent: "center",
-  },
-  ballHex: {
-    width: 16, height: 16, backgroundColor: theme.colors.background,
-    borderRadius: 3, transform: [{ rotate: "45deg" }],
-  },
-
-  statsBar: {
-    flexDirection: "row", marginHorizontal: 22, marginBottom: 18,
-    backgroundColor: theme.colors.input, borderRadius: 14,
-    borderWidth: 1.5, borderColor: theme.colors.inputBorder,
-    padding: 14, alignItems: "center",
-  },
-  statItem: { flex: 1, alignItems: "center" },
-  statNumber: { fontSize: 18, color: theme.colors.white, fontWeight: "900" },
-  statValue: { fontSize: 13, color: theme.colors.primary, fontWeight: "900" },
-  statLabel: { fontSize: 10, color: theme.colors.subtext, fontWeight: "600", marginTop: 2, textTransform: "uppercase" },
-  statDivider: { width: 1, height: 32, backgroundColor: theme.colors.inputBorder },
-
-  emptyState: { flex: 1, alignItems: "center", justifyContent: "center", paddingBottom: 80 },
-  emptyEmoji: { fontSize: 56, marginBottom: 16 },
-  emptyText: { fontSize: 16, color: theme.colors.white, fontWeight: "700", marginBottom: 6 },
-  emptySubtext: { fontSize: 13, color: theme.colors.subtext },
-
-  listContent: { paddingHorizontal: 22, paddingBottom: 100 },
-
-  card: {
-    flexDirection: "row", backgroundColor: theme.colors.input,
-    borderRadius: 14, borderWidth: 1.5, borderColor: theme.colors.inputBorder,
-    marginBottom: 12, overflow: "hidden",
-  },
-  cardPago: { borderColor: "#1a5c2a" },
-
-  cardLeft: {
-    width: 44, backgroundColor: "#0a2010",
-    alignItems: "center", justifyContent: "center",
-  },
-  cardNumber: {
-    width: 26, height: 26, borderRadius: 13,
-    backgroundColor: "#2a4a30", alignItems: "center", justifyContent: "center",
-  },
-  cardNumberPago: { backgroundColor: theme.colors.primary },
-  cardNumberText: { fontSize: 11, fontWeight: "900", color: theme.colors.white },
-
-  cardBody: { flex: 1, padding: 12, gap: 2 },
-  cardName: { fontSize: 15, color: theme.colors.white, fontWeight: "800", marginBottom: 2 },
-  cardInfo: { fontSize: 11, color: "#6aac78", fontWeight: "500" },
-
-  pagoBadge: {
-    marginTop: 8, paddingVertical: 5, paddingHorizontal: 10,
-    borderRadius: 8, alignSelf: "flex-start", borderWidth: 1.5,
-  },
-  pagoBadgePago: { backgroundColor: "#0a2e14", borderColor: theme.colors.primary },
-  pagoBadgePendente: { backgroundColor: "#2e0a0a", borderColor: "#e74c3c" },
-  pagoBadgeText: { fontSize: 11, fontWeight: "800", letterSpacing: 0.5 },
-  pagoBadgeTextPago: { color: theme.colors.primary },
-  pagoBadgeTextPendente: { color: "#e74c3c" },
-
-  cardActions: {
-    paddingHorizontal: 8, paddingVertical: 12,
-    justifyContent: "space-between", alignItems: "center", gap: 8,
-  },
-  editBtn: {
-    width: 32, height: 32, borderRadius: 8,
-    backgroundColor: "#0d2a3a", alignItems: "center", justifyContent: "center",
-  },
-  editBtnText: { fontSize: 14 },
-  removeBtn: {
-    width: 32, height: 32, borderRadius: 8,
-    backgroundColor: "#3a0a0a", alignItems: "center", justifyContent: "center",
-  },
-  removeBtnText: { fontSize: 14 },
-
-  fab: {
-    position: "absolute", bottom: 28, right: 22,
-    width: 58, height: 58, borderRadius: 29,
-    backgroundColor: theme.colors.primary,
-    alignItems: "center", justifyContent: "center",
-    shadowColor: theme.colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4, shadowRadius: 10, elevation: 8,
-  },
-  fabText: { fontSize: 30, color: theme.colors.background, fontWeight: "300", lineHeight: 34 },
-
-  modalOverlay: { flex: 1, backgroundColor: "#000000aa", justifyContent: "flex-end" },
-  modalBox: {
+  container: {
+    flex: 1,
     backgroundColor: theme.colors.background,
-    borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    padding: 24, borderWidth: 1.5, borderColor: theme.colors.inputBorder,
-    maxHeight: "90%",
+  },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    paddingHorizontal: 20,
+    paddingTop: 40,
+    paddingBottom: 20,
+    backgroundColor: theme.colors.background,
+  },
+  headerTitle: {
+    fontSize: 28,
+    color: theme.colors.secondary,
+    fontWeight: "bold",
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: "#AAA",
+    marginTop: 5,
+  },
+  backBtn: {
+    padding: 10,
+  },
+  backArrow: {
+    fontSize: 24,
+    color: theme.colors.secondary,
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  novaReservaBtn: {
+    backgroundColor: theme.colors.primary,
+    padding: 16,
+    borderRadius: 10,
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  novaReservaBtnText: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  emptyState: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
+  },
+  emptyStateText: {
+    color: "#AAA",
+    fontSize: 16,
+  },
+  reservaCard: {
+    backgroundColor: theme.colors.card,
+    borderRadius: 12,
+    marginBottom: 15,
+    overflow: "hidden",
+  },
+  reservaHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: "rgba(0,0,0,0.2)",
+  },
+  reservaQuadra: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: theme.colors.secondary,
+  },
+  reservaDia: {
+    fontSize: 14,
+    color: "#AAA",
+  },
+  reservaBody: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  reservaLabel: {
+    color: "#FFF",
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  reservaLabelBold: {
+    fontWeight: "bold",
+    color: theme.colors.secondary,
+  },
+  reservaValor: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: theme.colors.secondary,
+    marginTop: 8,
+  },
+  donoBadge: {
+    fontSize: 12,
+    color: theme.colors.primary,
+    fontWeight: "bold",
+    marginTop: 4,
+  },
+  reservaFooter: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.1)",
+  },
+  reservaFooterText: {
+    fontSize: 12,
+    color: theme.colors.primary,
+    fontWeight: "500",
+  },
+  reservaActions: {
+    flexDirection: "row",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.1)",
+  },
+  btnEditar: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: "center",
+    backgroundColor: theme.colors.primary,
+  },
+  btnDeletar: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: "center",
+    backgroundColor: "#d32f2f",
+  },
+  btnText: {
+    color: "#FFF",
+    fontWeight: "bold",
+    fontSize: 14,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
+    paddingTop: 50,
   },
   modalHeader: {
-    flexDirection: "row", justifyContent: "space-between",
-    alignItems: "center", marginBottom: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingBottom: 16,
   },
-  modalTitle: { fontSize: 24, color: theme.colors.white, fontWeight: "900", letterSpacing: 2 },
-  modalClose: { fontSize: 18, color: theme.colors.subtext, fontWeight: "700", padding: 4 },
-
-  valorBadge: {
-    backgroundColor: "#0a2e14", borderWidth: 1.5, borderColor: theme.colors.primary,
-    borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14,
-    marginBottom: 18, alignItems: "center",
+  modalTitle: {
+    fontSize: 24,
+    color: theme.colors.secondary,
+    fontWeight: "bold",
   },
-  valorBadgeText: { color: theme.colors.primary, fontWeight: "800", fontSize: 14 },
-
-  inputLabel: {
-    fontSize: 11, fontWeight: "700", color: theme.colors.label,
-    letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 6,
+  modalCloseBtn: {
+    fontSize: 28,
+    color: "#AAA",
+    fontWeight: "bold",
+  },
+  modalContent: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  formSection: {
+    marginBottom: 24,
+  },
+  formLabel: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: theme.colors.secondary,
+    marginBottom: 12,
+  },
+  quadrasContainer: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  quadraBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: theme.colors.card,
+    alignItems: "center",
+  },
+  quadraBtnActive: {
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
+  },
+  quadraBtnText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#AAA",
+  },
+  quadraBtnTextActive: {
+    color: "#FFF",
+  },
+  durationContainer: {
+    gap: 10,
+  },
+  durationBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: theme.colors.card,
+    alignItems: "center",
+  },
+  durationBtnActive: {
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
+  },
+  durationBtnText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#AAA",
+  },
+  durationBtnTextActive: {
+    color: "#FFF",
   },
   input: {
-    width: "100%", paddingHorizontal: 16, paddingVertical: 13,
-    backgroundColor: theme.colors.input, borderWidth: 1.5,
-    borderColor: theme.colors.inputBorder, borderRadius: 12,
-    fontSize: 14, color: theme.colors.white, marginBottom: 14,
+    backgroundColor: theme.colors.card,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: "#FFF",
+    borderWidth: 1,
+    borderColor: theme.colors.inputBorder,
   },
-  btnSalvar: {
-    width: "100%", paddingVertical: 15, backgroundColor: theme.colors.primary,
-    borderRadius: 16, alignItems: "center", marginTop: 4, marginBottom: 8,
+  dateTimeBtn: {
+    backgroundColor: theme.colors.card,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: theme.colors.inputBorder,
+    alignItems: "center",
   },
-  btnSalvarText: { color: theme.colors.background, fontWeight: "900", fontSize: 15, letterSpacing: 2 },
+  dateTimeBtnText: {
+    fontSize: 16,
+    color: "#FFF",
+    fontWeight: "500",
+  },
+  resumoCard: {
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+    borderLeftWidth: 4,
+    borderLeftColor: theme.colors.primary,
+  },
+  resumoTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: theme.colors.secondary,
+    marginBottom: 12,
+  },
+  resumoLine: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  resumoValorLine: {
+    marginBottom: 0,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.1)",
+  },
+  resumoLabel: {
+    fontSize: 14,
+    color: "#AAA",
+  },
+  resumoValue: {
+    fontSize: 14,
+    color: "#FFF",
+    fontWeight: "500",
+  },
+  resumoValor: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: theme.colors.secondary,
+  },
+  formActions: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 40,
+  },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: theme.colors.card,
+    alignItems: "center",
+  },
+  cancelBtnText: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#AAA",
+  },
+  salvarBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    backgroundColor: theme.colors.primary,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  salvarBtnText: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#FFF",
+  },
 });
